@@ -1,0 +1,732 @@
+<!-- 启动方式：在本目录下跑 python3 -m http.server 8080
+     然后浏览器访问 http://localhost:8080
+     iPad/手机访问 http://<电脑局域网IP>:8080
+     不能用 file:// 双击打开（麦克风权限会被拒） -->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>现画现跳 🎨🎵</title>
+
+<!-- PWA manifest -->
+<link rel="manifest" href="manifest.json">
+
+<!-- iOS Safari 专属 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="画线跳舞">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+
+<!-- Android 顶部状态栏颜色 -->
+<meta name="theme-color" content="#ff8a3d">
+
+<!-- 防止误触系统手势 -->
+<meta name="format-detection" content="telephone=no">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { background: #fffbe8; font-family: -apple-system, "PingFang SC", sans-serif; font-size: 18px; color: #333; padding: 12px; padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: max(12px, env(safe-area-inset-bottom)); max-width: 680px; margin: 0 auto; }
+h1 { text-align: center; font-size: 32px; padding: 16px 0 8px; }
+.card { background: #fff8e1; border-radius: 20px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
+.card h2 { font-size: 22px; margin-bottom: 12px; }
+#mainCanvas { display: block; width: 100%; height: 360px; background: #fff; border-radius: 14px; border: 3px solid #f0c040; touch-action: none; cursor: crosshair; transition: border-color 0.4s; }
+#mainCanvas.dancing { border-color: #ff9800; }
+.btn-row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+button { font-size: 18px; padding: 10px 20px; border: none; border-radius: 14px; cursor: pointer; font-weight: bold; transition: opacity 0.2s, transform 0.1s; }
+button:active { transform: scale(0.96); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+#undoBtn { background: #ffe082; }
+#clearBtn { background: #ffccbc; }
+#testMicBtn { background: #c8e6c9; }
+#startDanceBtn { display: block; width: 100%; font-size: 26px; padding: 18px; background: linear-gradient(135deg, #ff9800, #ff5722); color: #fff; border-radius: 20px; margin: 8px 0; }
+#startDanceBtn.dancing { background: linear-gradient(135deg, #757575, #424242); }
+#strokeCount { font-size: 17px; color: #888; margin-top: 8px; }
+.vol-wrap { position: relative; height: 20px; background: #eee; border-radius: 10px; overflow: visible; margin: 12px 0; }
+#volBar { height: 100%; width: 0%; background: #66bb6a; border-radius: 10px; transition: background 0.1s; }
+#volThreshLine { position: absolute; top: -4px; width: 4px; height: 28px; background: #f44336; border-radius: 2px; left: 50%; }
+.slider-row { display: flex; align-items: center; gap: 10px; font-size: 16px; margin-top: 8px; }
+#sensitivitySlider { flex: 1; }
+#beatSensSlider     { flex: 1; }
+#motionScaleSlider  { flex: 1; }
+#motionScaleVal     { min-width: 32px; font-weight: bold; }
+#threshVal    { min-width: 38px; font-weight: bold; }
+#beatSensVal  { min-width: 38px; font-weight: bold; }
+.hint { font-size: 15px; color: #888; margin-top: 8px; line-height: 1.5; }
+#toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.75); color: #fff; padding: 12px 28px; border-radius: 30px; font-size: 18px; pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 999; white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1>🎨 现画现跳 🎵</h1>
+
+<div class="card">
+  <h2 id="canvasTitle">✏️ 先画几条线</h2>
+  <canvas id="mainCanvas"></canvas>
+  <div class="btn-row">
+    <button id="undoBtn">↩️ 撤销上一笔</button>
+    <button id="clearBtn">🗑️ 清空画布</button>
+  </div>
+  <div id="strokeCount">还没画呢，动手吧！</div>
+</div>
+
+<div class="card">
+  <h2>🎤 调一下麦克风</h2>
+  <button id="testMicBtn">🎤 测试麦克风</button>
+  <div class="vol-wrap">
+    <div id="volBar"></div>
+    <div id="volThreshLine"></div>
+  </div>
+  <div class="slider-row">
+    <span>灵敏度</span>
+    <span style="font-size:14px;color:#aaa">容易触发</span>
+    <input type="range" id="sensitivitySlider" min="0.1" max="1.0" step="0.05" value="0.5">
+    <span style="font-size:14px;color:#aaa">需要大喊</span>
+    <span id="threshVal">0.50</span>
+  </div>
+  <div class="slider-row">
+    <span>🥁 节拍灵敏度</span>
+    <span style="font-size:14px;color:#aaa">钝感</span>
+    <input type="range" id="beatSensSlider" min="0.3" max="3.0" step="0.1" value="1.0">
+    <span style="font-size:14px;color:#aaa">敏感</span>
+    <span id="beatSensVal">1.0</span>
+  </div>
+  <div class="slider-row">
+    <span>💃 动作幅度</span>
+    <span style="font-size:14px;color:#aaa">小</span>
+    <input type="range" id="motionScaleSlider" min="0.5" max="3.5" step="0.1" value="1.5">
+    <span style="font-size:14px;color:#aaa">大</span>
+    <span id="motionScaleVal">1.5</span>
+  </div>
+  <div class="hint">💡 把手机放旁边外放任意音乐，或者直接对着屏幕喊一声试试</div>
+</div>
+
+<button id="startDanceBtn">✨ 开始跳舞</button>
+
+<div id="toast"></div>
+
+<script>
+const CONFIG = {
+  // FFT 频段（Hz）
+  bassRange:   [0, 200],
+  midRange:    [200, 2000],
+  trebleRange: [2000, 20000],
+
+  // 背景 FFT 映射权重（主视觉交给 onset 波包，这里只做底层装饰）
+  bassTranslate: 15,
+  midWaveAmp:    10,
+  trebleJitter:  2.5,
+
+  // RMS → 整体缩放
+  micScaleMin:      1.0,
+  micScaleMax:      1.8,
+  micSmoothingTime: 0.3,
+
+  // 喊叫爆炸
+  shoutThreshold:       0.5,
+  shoutBoostMultiplier: 3,
+  shoutBoostDuration:   0.5,
+  shoutColor:           '#ff3030',
+  shoutColorDuration:   0.4,
+
+  // Spectral Flux Onset 检测（per-band）
+  fluxAbsFloor:    200,
+  fluxHistorySize: 43,
+  onsetCooldownMs: 100,
+  rmsGateFloor:    0.05,
+
+  // 波包物理参数
+  waveLifeMs:       600,
+  waveSpatialSigma: 15,
+  waveTimeDecay:    5,
+  waveBassShift:    8,
+  waveMidAmp:       25,
+  waveTrebleJitter: 15,
+  waveAmplitudeDiv: 1500,
+
+  // 渲染
+  fps: 60,
+
+  // 画笔
+  strokeWidth: 10,
+  strokeColor: '#1a1a1a',
+};
+
+let shoutThreshold  = CONFIG.shoutThreshold;
+let beatSensitivity = 1.0;
+let motionScale     = 1.5;
+
+// 基于采样率的真实 Hz 频段边界（initMic 后写入）
+let fluxBassEnd = 0;
+let fluxMidEnd  = 0;
+
+const audioState = {
+  rawRMS: 0, smoothedRMS: 0,
+  bass: 0, mid: 0, treble: 0,
+  prevSpectrum: null,
+  spectrumHistory: [],
+  avgSpectrum: null,
+  bassFlux: 0,   midFlux: 0,   trebleFlux: 0,
+  bassFluxHistory: [],   midFluxHistory: [],   trebleFluxHistory: [],
+  bassFluxThreshold: 0,  midFluxThreshold: 0,  trebleFluxThreshold: 0,
+  bassFluxStd: 0,        midFluxStd: 0,        trebleFluxStd: 0,
+  lastBassOnsetTime: 0,  lastMidOnsetTime: 0,  lastTrebleOnsetTime: 0,
+  recentPeakBassFlux: 100,  recentPeakMidFlux: 100,  recentPeakTrebleFlux: 100,
+};
+
+const effectState = {
+  shoutBoost:      0,
+  shoutColorTimer: 0,
+  currentColor:    CONFIG.strokeColor,
+  intensity:       0.5,
+  onsetWaves:      [],
+};
+
+let strokes = [], currentStroke = [], isDrawing = false;
+let isDancing = false, danceFrameCount = 0;
+
+let audioContext = null, micStream = null, micSource = null;
+let analyser = null, micReady = false;
+let calibAnimId = null, danceAnimId = null, lastFrameTime = null;
+
+const mainCanvas    = document.getElementById('mainCanvas');
+const mainCtx       = mainCanvas.getContext('2d');
+const canvasTitle   = document.getElementById('canvasTitle');
+const volBar        = document.getElementById('volBar');
+const volThreshLine = document.getElementById('volThreshLine');
+const strokeCountEl = document.getElementById('strokeCount');
+const testMicBtn    = document.getElementById('testMicBtn');
+const undoBtn       = document.getElementById('undoBtn');
+const clearBtn      = document.getElementById('clearBtn');
+const startDanceBtn = document.getElementById('startDanceBtn');
+const slider        = document.getElementById('sensitivitySlider');
+const threshVal     = document.getElementById('threshVal');
+const beatSensSlider    = document.getElementById('beatSensSlider');
+const beatSensVal       = document.getElementById('beatSensVal');
+const motionScaleSlider = document.getElementById('motionScaleSlider');
+const motionScaleVal    = document.getElementById('motionScaleVal');
+const toastEl        = document.getElementById('toast');
+
+// ── 工具 ──────────────────────────────────────────────────────────────
+
+function lerpColor(c1, c2, t) {
+  const r1=parseInt(c1.slice(1,3),16), g1=parseInt(c1.slice(3,5),16), b1=parseInt(c1.slice(5,7),16);
+  const r2=parseInt(c2.slice(1,3),16), g2=parseInt(c2.slice(3,5),16), b2=parseInt(c2.slice(5,7),16);
+  return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
+}
+
+function resizeCanvas(canvas) {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width  * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+  canvas.getContext('2d').scale(window.devicePixelRatio, window.devicePixelRatio);
+}
+function canvasW(c) { return c.getBoundingClientRect().width; }
+function canvasH(c) { return c.getBoundingClientRect().height; }
+
+function getPos(e, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const src  = e.touches ? e.touches[0] : e;
+  return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+}
+
+function drawSmoothPath(ctx, pts, color, width) {
+  if (pts.length < 2) return;
+  ctx.beginPath();
+  ctx.strokeStyle = color || CONFIG.strokeColor;
+  ctx.lineWidth   = width || CONFIG.strokeWidth;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i].x + pts[i+1].x) / 2;
+    const my = (pts[i].y + pts[i+1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+  }
+  ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+  ctx.stroke();
+}
+
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.style.opacity = '1';
+  setTimeout(() => { toastEl.style.opacity = '0'; }, 1800);
+}
+
+// ── 画布（静态模式）───────────────────────────────────────────────────
+
+function redrawStrokes() {
+  const w = canvasW(mainCanvas), h = canvasH(mainCanvas);
+  mainCtx.clearRect(0, 0, w, h);
+  mainCtx.fillStyle = '#fff';
+  mainCtx.fillRect(0, 0, w, h);
+  strokes.forEach(s => drawSmoothPath(mainCtx, s));
+  if (currentStroke.length > 1) drawSmoothPath(mainCtx, currentStroke);
+}
+
+function updateStrokeCount() {
+  strokeCountEl.textContent = strokes.length > 0
+    ? `已画了 ${strokes.length} 笔 ✅`
+    : '还没画呢，动手吧！';
+}
+
+function setupDrawing() {
+  resizeCanvas(mainCanvas);
+  redrawStrokes();
+  mainCanvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    isDrawing = true;
+    currentStroke = [getPos(e, mainCanvas)];
+    mainCanvas.setPointerCapture(e.pointerId);
+  });
+  mainCanvas.addEventListener('pointermove', e => {
+    if (!isDrawing) return;
+    currentStroke.push(getPos(e, mainCanvas));
+    if (!isDancing) redrawStrokes();
+  });
+  mainCanvas.addEventListener('pointerup', e => {
+    if (!isDrawing) return;
+    isDrawing = false;
+    if (currentStroke.length > 1) strokes.push([...currentStroke]);
+    currentStroke = [];
+    if (!isDancing) redrawStrokes();
+    updateStrokeCount();
+  });
+  mainCanvas.addEventListener('pointercancel', () => {
+    isDrawing = false; currentStroke = [];
+  });
+}
+
+// ── 麦克风 ────────────────────────────────────────────────────────────
+
+async function initMic() {
+  if (micReady) return true;
+  try {
+    micStream    = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    micSource    = audioContext.createMediaStreamSource(micStream);
+    analyser     = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0;
+    micSource.connect(analyser);
+    audioState.prevSpectrum = new Float32Array(analyser.frequencyBinCount);
+
+    const sampleRate = audioContext.sampleRate;
+    const binCount   = analyser.frequencyBinCount;
+    const nyquist    = sampleRate / 2;
+    fluxBassEnd = Math.floor(200  / nyquist * binCount);
+    fluxMidEnd  = Math.floor(2000 / nyquist * binCount);
+
+    console.log('[AnalyserNode] smoothingTimeConstant =', analyser.smoothingTimeConstant);
+    console.log('[频段切分] sampleRate =', sampleRate,
+                ', bassEnd bin =', fluxBassEnd, '(0-200Hz)',
+                ', midEnd bin =',  fluxMidEnd,  '(200-2000Hz)');
+
+    micReady = true;
+    return true;
+  } catch (err) {
+    console.error('[现画现跳] 麦克风失败:', err);
+    showToast('麦克风没授权，请用 http://localhost 打开');
+    alert('麦克风没授权。\n请用 http://localhost 或 https 打开页面，不能用 file:// 双击。\n在终端跑：python3 -m http.server 8080');
+    return false;
+  }
+}
+
+// 纯 mutator：读 analyser，写 audioState；onset 时同时写 effectState.onsetWaves
+function analyseAudio() {
+  if (!analyser) return;
+
+  // ── RMS（时域）────────────────────────────────────────────────────
+  const timeBuf = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(timeBuf);
+  let rmsSum = 0;
+  for (let i = 0; i < timeBuf.length; i++) rmsSum += timeBuf[i] * timeBuf[i];
+  const raw = Math.sqrt(rmsSum / timeBuf.length);
+  audioState.rawRMS = raw;
+  const alpha = 1 - Math.exp(-1 / (CONFIG.micSmoothingTime * CONFIG.fps));
+  audioState.smoothedRMS += alpha * (raw - audioState.smoothedRMS);
+
+  // ── FFT 三频段（归一化到 0-1）─────────────────────────────────────
+  const freqBuf = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(freqBuf);
+  const nyq   = audioContext.sampleRate / 2;
+  const binHz = nyq / analyser.frequencyBinCount;
+  function bandMean(lo, hi) {
+    const a = Math.floor(lo / binHz);
+    const b = Math.min(Math.ceil(hi / binHz), freqBuf.length - 1);
+    let s = 0; for (let i = a; i <= b; i++) s += freqBuf[i];
+    return s / ((b - a + 1) * 255);
+  }
+  audioState.bass   = bandMean(...CONFIG.bassRange);
+  audioState.mid    = bandMean(...CONFIG.midRange);
+  audioState.treble = bandMean(...CONFIG.trebleRange);
+
+  // ── Per-band Spectral Flux（频谱白化版）────────────────────────────
+  const binCount = freqBuf.length;
+  const bassEnd  = fluxBassEnd || Math.floor(binCount * 0.05);
+  const midEnd   = fluxMidEnd  || Math.floor(binCount * 0.40);
+
+  // 1. 维护频谱历史（用于计算滑动平均背景）
+  audioState.spectrumHistory.push(new Float32Array(freqBuf));
+  if (audioState.spectrumHistory.length > CONFIG.fluxHistorySize) {
+    audioState.spectrumHistory.shift();
+  }
+
+  // 2. 算滑动平均背景频谱（约 1 秒窗口）
+  if (!audioState.avgSpectrum) {
+    audioState.avgSpectrum = new Float32Array(binCount);
+  }
+  const histLen = audioState.spectrumHistory.length;
+  for (let i = 0; i < binCount; i++) {
+    let sum = 0;
+    for (const past of audioState.spectrumHistory) sum += past[i];
+    audioState.avgSpectrum[i] = sum / histLen;
+  }
+
+  // 3. 白化：减掉背景，只保留"超出背景的部分"
+  const whitenedSpectrum = new Float32Array(binCount);
+  for (let i = 0; i < binCount; i++) {
+    whitenedSpectrum[i] = Math.max(0, freqBuf[i] - audioState.avgSpectrum[i]);
+  }
+
+  // 4. 用白化频谱算 per-band flux；prevSpectrum 仍存原始值（保留突变信号）
+  let bassFlux = 0, midFlux = 0, trebleFlux = 0;
+  for (let i = 0; i < binCount; i++) {
+    const diff = whitenedSpectrum[i] - audioState.prevSpectrum[i];
+    if (diff <= 0) continue;
+    if      (i < bassEnd) bassFlux   += diff;
+    else if (i < midEnd)  midFlux    += diff;
+    else                  trebleFlux += diff * 0.3;
+  }
+  audioState.bassFlux   = bassFlux;
+  audioState.midFlux    = midFlux;
+  audioState.trebleFlux = trebleFlux;
+  audioState.prevSpectrum.set(freqBuf);
+
+  // 5. 近期峰值跟踪（慢衰减 ≈ 12s 半衰期，用于振幅归一化）
+  audioState.recentPeakBassFlux   = Math.max(audioState.recentPeakBassFlux   * 0.995, bassFlux);
+  audioState.recentPeakMidFlux    = Math.max(audioState.recentPeakMidFlux    * 0.995, midFlux);
+  audioState.recentPeakTrebleFlux = Math.max(audioState.recentPeakTrebleFlux * 0.995, trebleFlux);
+
+  // 各频段独立维护动态阈值（均值 + 标准差 × beatSensitivity）
+  const bands = [
+    [bassFlux,   audioState.bassFluxHistory,   'bassFluxThreshold',   'bassFluxStd'],
+    [midFlux,    audioState.midFluxHistory,    'midFluxThreshold',    'midFluxStd'],
+    [trebleFlux, audioState.trebleFluxHistory, 'trebleFluxThreshold', 'trebleFluxStd'],
+  ];
+  for (const [val, hist, threshKey, stdKey] of bands) {
+    hist.push(val);
+    if (hist.length > CONFIG.fluxHistorySize) hist.shift();
+    const avg = hist.reduce((a, b) => a + b, 0) / hist.length;
+    const variance = hist.reduce((sum, v) => sum + (v - avg) ** 2, 0) / hist.length;
+    const std = Math.sqrt(variance);
+    audioState[threshKey] = avg + std * beatSensitivity;
+    audioState[stdKey]    = std;
+  }
+
+  // ── Per-band Onset 检测（各自独立 cooldown，同帧可同时触发）──────
+  const now = performance.now();
+  const rmsOk = audioState.smoothedRMS > CONFIG.rmsGateFloor;
+
+  if (bassFlux   > CONFIG.fluxAbsFloor && bassFlux   > audioState.bassFluxThreshold   && rmsOk && now - audioState.lastBassOnsetTime   > CONFIG.onsetCooldownMs) {
+    audioState.lastBassOnsetTime = now;
+    spawnWave('bass', bassFlux);
+  }
+  if (midFlux    > CONFIG.fluxAbsFloor && midFlux    > audioState.midFluxThreshold    && rmsOk && now - audioState.lastMidOnsetTime    > CONFIG.onsetCooldownMs) {
+    audioState.lastMidOnsetTime = now;
+    spawnWave('mid', midFlux);
+  }
+  if (trebleFlux > CONFIG.fluxAbsFloor && trebleFlux > audioState.trebleFluxThreshold && rmsOk && now - audioState.lastTrebleOnsetTime > CONFIG.onsetCooldownMs) {
+    audioState.lastTrebleOnsetTime = now;
+    spawnWave('treble', trebleFlux);
+  }
+
+  // 喊叫红色脉冲（独立于 onset，基于瞬时 rawRMS）
+  if (audioState.rawRMS > shoutThreshold) {
+    effectState.shoutColorTimer = 0.4;
+    effectState.shoutBoost      = 1.0;
+  }
+}
+
+function spawnWave(type, flux) {
+  const peakFlux = type === 'bass'   ? audioState.recentPeakBassFlux
+                 : type === 'mid'    ? audioState.recentPeakMidFlux
+                 :                     audioState.recentPeakTrebleFlux;
+  const totalPts = strokes.reduce((s, st) => s + st.length, 0)
+                 + (currentStroke.length > 1 ? currentStroke.length : 0);
+  const originIdx = totalPts > 0 ? Math.floor(Math.random() * totalPts) : 0;
+  effectState.onsetWaves.push({
+    bornAt:    performance.now(),
+    originIdx: originIdx,
+    direction: Math.random() > 0.5 ? 1 : -1,
+    velocity:  60 + Math.random() * 60,
+    amplitude: Math.min(flux / Math.max(peakFlux, 200), 3.0),
+    type:      type,
+  });
+  console.log('[现画现跳 onset]', { type, origin: originIdx, flux: flux.toFixed(0), peak: peakFlux.toFixed(0) });
+}
+
+// 读 audioState，写 effectState
+function computeEffect(dt) {
+  effectState.intensity = 1.0 + audioState.smoothedRMS * 1.5;
+  effectState.shoutBoost *= 0.85;
+  effectState.shoutColorTimer = Math.max(0, effectState.shoutColorTimer - dt);
+  if (effectState.shoutColorTimer > 0) {
+    const t = effectState.shoutColorTimer / 0.4;
+    effectState.currentColor = lerpColor(CONFIG.strokeColor, CONFIG.shoutColor, t);
+  } else {
+    effectState.currentColor = CONFIG.strokeColor;
+  }
+}
+
+// ── 渲染 ──────────────────────────────────────────────────────────────
+
+function drawAnimatedStroke(ctx, pts, bassDx, bassDy, time, startIdx, now) {
+  if (pts.length < 2) return startIdx + pts.length;
+
+  const { mid, treble, smoothedRMS } = audioState;
+  const { intensity, shoutBoost } = effectState;
+  const rawGlobalScale = CONFIG.micScaleMin + smoothedRMS * (CONFIG.micScaleMax - CONFIG.micScaleMin);
+  const globalScale = 1.0 + (rawGlobalScale - 1.0) * motionScale;
+
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+
+  let maxColorBoost = 0;
+
+  const transformed = pts.map((p, i) => {
+    const gIdx = startIdx + i;
+
+    let waveDisp = Math.sin(time * 3 + i * 0.3) * mid * CONFIG.midWaveAmp;
+    let jitter   = treble * CONFIG.trebleJitter * 0.5;
+    let extraDy  = 0;
+    let colorBoost = 0;
+
+    for (const w of effectState.onsetWaves) {
+      const age       = (now - w.bornAt) / 1000;
+      const timeDecay = Math.exp(-age * CONFIG.waveTimeDecay);
+      const peakPos   = w.originIdx + w.direction * w.velocity * age;
+      const dist      = Math.abs(gIdx - peakPos);
+      const sigma     = CONFIG.waveSpatialSigma;
+      const spatialG  = Math.exp(-(dist * dist) / (sigma * sigma));
+      const influence = w.amplitude * timeDecay * spatialG;
+
+      if (w.type === 'bass') {
+        waveDisp  += influence * intensity * 0.6;
+        extraDy   += influence * intensity * 15;
+      } else if (w.type === 'mid') {
+        waveDisp  += influence * intensity * 18;
+      } else {
+        jitter    += influence * intensity * 15;
+        colorBoost += influence * intensity * 0.8;
+      }
+    }
+
+    waveDisp *= motionScale;
+    extraDy  *= motionScale;
+    jitter   *= motionScale;
+
+    jitter += shoutBoost * 30;
+
+    if (colorBoost > maxColorBoost) maxColorBoost = colorBoost;
+
+    let x = (p.x - cx) * globalScale + cx + bassDx;
+    let y = (p.y - cy) * globalScale + cy + bassDy + extraDy;
+
+    const next = pts[Math.min(i + 1, pts.length - 1)];
+    const nx = -(next.y - p.y);
+    const ny =   next.x - p.x;
+    const nl = Math.sqrt(nx * nx + ny * ny) || 1;
+    x += (nx / nl) * waveDisp;
+    y += (ny / nl) * waveDisp;
+    x += (Math.random() - 0.5) * jitter;
+    y += (Math.random() - 0.5) * jitter;
+
+    return { x, y };
+  });
+
+  let useColor = effectState.currentColor;
+  if (effectState.shoutColorTimer <= 0 && maxColorBoost > 0.05) {
+    const lightness = Math.floor(26 + Math.min(maxColorBoost, 1) * 100);
+    useColor = `rgb(${lightness},${lightness},${lightness})`;
+  }
+
+  ctx.globalAlpha = 0.85 + treble * 0.15;
+  drawSmoothPath(ctx, transformed, useColor, CONFIG.strokeWidth);
+  ctx.globalAlpha = 1;
+
+  return startIdx + pts.length;
+}
+
+function renderDanceFrame(time) {
+  const w = canvasW(mainCanvas), h = canvasH(mainCanvas);
+  mainCtx.fillStyle = '#fff';
+  mainCtx.fillRect(0, 0, w, h);
+
+  const now = performance.now();
+
+  effectState.onsetWaves = effectState.onsetWaves.filter(
+    wv => (now - wv.bornAt) < CONFIG.waveLifeMs
+  );
+
+  const { bass } = audioState;
+  const bassDx = Math.sin(time * 2)   * bass * CONFIG.bassTranslate * motionScale;
+  const bassDy = Math.cos(time * 1.7) * bass * CONFIG.bassTranslate * motionScale;
+
+  let globalIdx = 0;
+  const drawList = [
+    ...strokes,
+    ...(currentStroke.length > 1 ? [currentStroke] : []),
+  ];
+  for (const pts of drawList) {
+    globalIdx = drawAnimatedStroke(mainCtx, pts, bassDx, bassDy, time, globalIdx, now);
+  }
+}
+
+// ── 音量条 ────────────────────────────────────────────────────────────
+
+function updateVolumeBar() {
+  const pct      = Math.min(audioState.rawRMS * 400, 100);
+  const flashing = audioState.rawRMS > shoutThreshold;
+  volBar.style.width      = pct + '%';
+  volBar.style.background = flashing ? '#ffeb3b' : '#66bb6a';
+  volThreshLine.style.left = (shoutThreshold * 100) + '%';
+}
+
+function calibrationLoop() {
+  analyseAudio();
+  updateVolumeBar();
+  calibAnimId = requestAnimationFrame(calibrationLoop);
+}
+
+async function testMic() {
+  const ok = await initMic();
+  if (!ok) return;
+  testMicBtn.textContent = '🎤 麦克风已启动 ✅';
+  testMicBtn.disabled = true;
+  if (calibAnimId) cancelAnimationFrame(calibAnimId);
+  calibrationLoop();
+}
+
+// ── 跳舞主循环 ────────────────────────────────────────────────────────
+
+function danceLoop(ts) {
+  const time = ts / 1000;
+  const dt   = lastFrameTime ? Math.min(ts - lastFrameTime, 100) / 1000 : 0.016;
+  lastFrameTime = ts;
+
+  analyseAudio();
+  computeEffect(dt);
+  renderDanceFrame(time);
+
+  if (danceFrameCount < 180 && danceFrameCount % 5 === 0) {
+    console.log('[现画现跳]', {
+      bass:   `${audioState.bassFlux.toFixed(0)} / ${audioState.bassFluxThreshold.toFixed(0)}`,
+      mid:    `${audioState.midFlux.toFixed(0)} / ${audioState.midFluxThreshold.toFixed(0)}`,
+      treble: `${audioState.trebleFlux.toFixed(0)} / ${audioState.trebleFluxThreshold.toFixed(0)}`,
+      std:    `${audioState.bassFluxStd.toFixed(0)} / ${audioState.midFluxStd.toFixed(0)} / ${audioState.trebleFluxStd.toFixed(0)}`,
+      peak:   `${audioState.recentPeakBassFlux.toFixed(0)} / ${audioState.recentPeakMidFlux.toFixed(0)} / ${audioState.recentPeakTrebleFlux.toFixed(0)}`,
+      rms:         audioState.smoothedRMS.toFixed(2),
+      intensity:   effectState.intensity.toFixed(2),
+      waves:       effectState.onsetWaves.length,
+      sens:        beatSensitivity,
+      motionScale: motionScale.toFixed(1),
+    });
+  }
+  danceFrameCount++;
+
+  danceAnimId = requestAnimationFrame(danceLoop);
+}
+
+// ── 开始 / 停止跳舞 ───────────────────────────────────────────────────
+
+function setDanceLock(locked) {
+  undoBtn.disabled    = locked;
+  clearBtn.disabled   = locked;
+  testMicBtn.disabled = locked;
+}
+
+async function startDance() {
+  if (strokes.length === 0) { showToast('✏️ 先画一条线再跳舞！'); return; }
+  const ok = await initMic();
+  if (!ok) return;
+
+  if (calibAnimId) { cancelAnimationFrame(calibAnimId); calibAnimId = null; }
+  if (danceAnimId) { cancelAnimationFrame(danceAnimId); danceAnimId = null; }
+
+  isDancing = true;
+  danceFrameCount = 0;
+
+  audioState.bassFluxHistory   = []; audioState.midFluxHistory   = []; audioState.trebleFluxHistory   = [];
+  audioState.bassFluxThreshold = 0;  audioState.midFluxThreshold = 0;  audioState.trebleFluxThreshold = 0;
+  audioState.lastBassOnsetTime = 0;  audioState.lastMidOnsetTime = 0;  audioState.lastTrebleOnsetTime = 0;
+  if (audioState.prevSpectrum) audioState.prevSpectrum.fill(0);
+  effectState.onsetWaves = [];
+
+  canvasTitle.textContent = '🎵 跳舞中，继续画也行！';
+  mainCanvas.classList.add('dancing');
+  startDanceBtn.textContent = '🛑 停止跳舞';
+  startDanceBtn.classList.add('dancing');
+  setDanceLock(true);
+
+  renderDanceFrame(0);
+  lastFrameTime = null;
+  danceAnimId = requestAnimationFrame(danceLoop);
+}
+
+function stopDance() {
+  isDancing = false;
+  if (danceAnimId) { cancelAnimationFrame(danceAnimId); danceAnimId = null; }
+
+  effectState.onsetWaves      = [];
+  effectState.shoutBoost      = 0;
+  effectState.shoutColorTimer = 0;
+  effectState.currentColor    = CONFIG.strokeColor;
+
+  mainCanvas.classList.remove('dancing');
+  canvasTitle.textContent   = '✏️ 先画几条线';
+  startDanceBtn.textContent = '✨ 开始跳舞';
+  startDanceBtn.classList.remove('dancing');
+  setDanceLock(false);
+
+  redrawStrokes();
+
+  if (micReady) {
+    calibAnimId = requestAnimationFrame(calibrationLoop);
+  }
+}
+
+// ── 事件绑定 ──────────────────────────────────────────────────────────
+
+slider.addEventListener('input', () => {
+  shoutThreshold = parseFloat(slider.value);
+  threshVal.textContent = shoutThreshold.toFixed(2);
+  updateVolumeBar();
+});
+
+beatSensSlider.addEventListener('input', () => {
+  beatSensitivity = parseFloat(beatSensSlider.value);
+  beatSensVal.textContent = beatSensitivity.toFixed(2);
+});
+
+motionScaleSlider.addEventListener('input', () => {
+  motionScale = parseFloat(motionScaleSlider.value);
+  motionScaleVal.textContent = motionScale.toFixed(1);
+});
+
+undoBtn.addEventListener('click',  () => { strokes.pop(); redrawStrokes(); updateStrokeCount(); });
+clearBtn.addEventListener('click', () => { strokes = []; redrawStrokes(); updateStrokeCount(); });
+testMicBtn.addEventListener('click', testMic);
+
+startDanceBtn.addEventListener('click', () => {
+  if (isDancing) stopDance(); else startDance();
+});
+
+window.addEventListener('resize', () => {
+  if (!isDancing) { resizeCanvas(mainCanvas); redrawStrokes(); }
+});
+
+setupDrawing();
+updateVolumeBar();
+updateStrokeCount();
+</script>
+</body>
+</html>
