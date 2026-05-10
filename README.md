@@ -47,5 +47,3 @@ python3 -m http.server 8080
 ## License
 
 [MIT](./LICENSE)
-
-<!-- auto-deploy test 1778399947 -->
