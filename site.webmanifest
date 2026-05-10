@@ -1,6 +1,6 @@
 {
-    "name": "画线跳舞",
-    "short_name": "画线跳舞",
+    "name": "draw-dance",
+    "short_name": "draw-dance",
     "description": "画一条线,让它跟着声音律动",
     "start_url": "./",
     "scope": "./",

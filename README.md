@@ -1,4 +1,4 @@
-# 现画现跳 🎨🎵
+# draw-dance 🎨🎵
 
 在画布上随手画几条线 → 麦克风听任何声音(音乐、喊叫、环境声)→ 线条跟着律动 → 录 30 秒视频下载。
 
@@ -19,7 +19,7 @@
 因为 `getUserMedia`(麦克风权限)需要安全上下文,直接双击打开 `index.html` 不行,必须用本地服务器:
 
 ```bash
-cd 线条跳动
+cd draw-dance
 python3 -m http.server 8080
 ```
 
